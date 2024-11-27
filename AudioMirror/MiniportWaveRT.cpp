@@ -96,7 +96,7 @@ Return Value:
 	}
 	// System streams.
 	size = sizeof(MiniportWaveRTStream*) * m_ulMaxSystemStreams;
-	m_SystemStreams = (MiniportWaveRTStream**)ExAllocatePoolWithTag(NonPagedPoolNx, size, WAVERT_POOLTAG);
+	m_SystemStreams = (MiniportWaveRTStream**)ExAllocatePool2(POOL_FLAG_NON_PAGED, size, WAVERT_POOLTAG);
 	if (m_SystemStreams == NULL)
 	{
 		return STATUS_INSUFFICIENT_RESOURCES;
@@ -279,11 +279,6 @@ ULONG MiniportWaveRT::GetSystemPinId()
 }
 
 #pragma code_seg()
-IAdapterCommon* MiniportWaveRT::GetAdapter()
-{
-	return m_pAdapterCommon;
-}
-
 STDMETHODIMP_(NTSTATUS) MiniportWaveRT::NewStream
 (
 	_Out_ PMINIPORTWAVERTSTREAM * OutStream,
@@ -359,7 +354,7 @@ Return Value:
 	//
 	if (NT_SUCCESS(ntStatus))
 	{
-		stream = new(NonPagedPoolNx, WAVERT_POOLTAG) MiniportWaveRTStream(NULL);
+		stream = new(POOL_FLAG_NON_PAGED, WAVERT_POOLTAG) MiniportWaveRTStream(NULL);
 
 		if (stream)
 		{
@@ -533,10 +528,7 @@ NTSTATUS MiniportWaveRT::Create
 	_Out_           PUNKNOWN                              * Unknown,
 	_In_            REFCLSID,
 	_In_opt_        PUNKNOWN                                UnknownOuter,
-	_When_((PoolType & NonPagedPoolMustSucceed) != 0,
-		__drv_reportError("Must succeed pool allocations are forbidden. "
-			"Allocation failures cause a system crash"))
-	_In_            POOL_TYPE                               PoolType,
+	_In_            POOL_FLAGS                              PoolType,
 	_In_            PUNKNOWN                                UnknownAdapter,
 	_In_opt_        PVOID                                   DeviceContext,
 	_In_            PENDPOINT_MINIPAIR                      MiniportPair
@@ -549,7 +541,7 @@ NTSTATUS MiniportWaveRT::Create
 	ASSERT(Unknown);
 	ASSERT(MiniportPair);
 
-	MiniportWaveRT *obj = new (PoolType, WAVERT_POOLTAG) MiniportWaveRT
+	MiniportWaveRT *obj = new(PoolType, WAVERT_POOLTAG) MiniportWaveRT
 	(
 		UnknownAdapter,
 		MiniportPair,
@@ -610,6 +602,10 @@ Return Value:
 	{
 		*Object = PVOID(PMINIPORTWAVERT(this));
 	}
+	else if (IsEqualGUIDAligned(Interface, IID_IMiniportAudioSignalProcessing))
+	{
+		*Object = PVOID(PMINIPORTAudioSignalProcessing(this));
+	}
 	else
 	{
 		*Object = NULL;
@@ -631,19 +627,23 @@ void MiniportWaveRT::SetPairedMiniport(MiniportWaveRT* miniport)
 	//clear all current pairs
 	if (m_pPairedMiniport) 
 	{
-		if (m_pPairedMiniport->m_SystemStream) m_pPairedMiniport->m_SystemStream->SetPairedStream(NULL);
+		if (m_pPairedMiniport->m_SystemStream) 
+			m_pPairedMiniport->m_SystemStream->SetPairedStream(NULL);
 		m_pPairedMiniport->m_pPairedMiniport = NULL;
 	}
-	if (m_SystemStream) m_SystemStream->SetPairedStream(NULL);
+	if (m_SystemStream) 
+		m_SystemStream->SetPairedStream(NULL);
 	m_pPairedMiniport = NULL;
 
 	//setup new pairs
 	m_pPairedMiniport = miniport;
-	if (m_pPairedMiniport) m_pPairedMiniport->m_pPairedMiniport = this;
-	if (m_pPairedMiniport->m_SystemStream && m_SystemStream)
-	{
-		m_SystemStream->SetPairedStream(m_pPairedMiniport->m_SystemStream);
-		m_pPairedMiniport->m_SystemStream->SetPairedStream(m_SystemStream);
+	if (m_pPairedMiniport) {
+		m_pPairedMiniport->m_pPairedMiniport = this;
+		if (m_pPairedMiniport->m_SystemStream && m_SystemStream)
+		{
+			m_SystemStream->SetPairedStream(m_pPairedMiniport->m_SystemStream);
+			m_pPairedMiniport->m_SystemStream->SetPairedStream(m_SystemStream);
+		}
 	}
 }
 
@@ -1143,6 +1143,81 @@ ULONG MiniportWaveRT::GetPinSupportedDeviceFormats(_In_ ULONG PinId, _Outptr_opt
 	ExReleaseFastMutex(&m_DeviceFormatsAndModesLock);
 
 	return pDeviceFormatsAndModes[PinId].WaveFormatsCount;
+}
+
+//=============================================================================
+#pragma code_seg("PAGE")
+NTSTATUS
+MiniportWaveRT::GetModes
+(
+	_In_                                        ULONG     Pin,
+	_Out_writes_opt_(*NumSignalProcessingModes) GUID* SignalProcessingModes,
+	_Inout_                                     ULONG* NumSignalProcessingModes
+)
+/*
+
+1.	If Pin is not a valid pin number,
+		return STATUS_INVALID_PARAMETER.
+
+2.	If Pin is a valid pin number and it supports n modes (n>0),
+		init out-parameters and return STATUS_SUCCESS.
+
+3.  Else this pin doesn't support any mode,
+		return STATUS_NOT_SUPPORTED.
+		example: bridge pins or another mode-not-aware pins.
+
+*/
+{
+	PAGED_CODE();
+
+	DPF_ENTER(("[CMiniportWaveRT::GetModes]"));
+
+	NTSTATUS                ntStatus = STATUS_INVALID_PARAMETER;
+	ULONG                   numModes = 0;
+	MODE_AND_DEFAULT_FORMAT* modeInfo = NULL;
+
+	if (Pin >= m_pMiniportPair->WaveDescriptor->PinCount)
+	{
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	//
+	// This method is valid only on the following pins:
+	//  render is offload capable:
+	//      sink (#0) and offload (#1) pins.
+	//  render is NOT offload capable:
+	//      sink (#0) pin.
+	//  capture device: 
+	//      source (#1) pin.
+	//
+	numModes = GetPinSupportedDeviceModes(Pin, &modeInfo);
+	if (numModes == 0)
+	{
+		return STATUS_NOT_SUPPORTED;
+	}
+
+	// If caller requests the modes, verify sufficient buffer size then return the modes
+	if (SignalProcessingModes != NULL)
+	{
+		if (*NumSignalProcessingModes < numModes)
+		{
+			*NumSignalProcessingModes = numModes;
+			ntStatus = STATUS_BUFFER_TOO_SMALL;
+			goto Done;
+		}
+
+		for (ULONG i = 0; i < numModes; ++i)
+		{
+			SignalProcessingModes[i] = modeInfo[i].Mode;
+		}
+	}
+
+	ASSERT(numModes > 0);
+	*NumSignalProcessingModes = numModes;
+	ntStatus = STATUS_SUCCESS;
+
+Done:
+	return ntStatus;
 }
 
 NTSTATUS MiniportWaveRT::ValidateStreamCreate

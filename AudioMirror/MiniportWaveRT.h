@@ -10,6 +10,7 @@ DEFINE_GUID(IID_MiniportWaveRT,
 
 class MiniportWaveRT :
 	public IMiniportWaveRT,
+	public IMiniportAudioSignalProcessing,
 	public CUnknown
 {
 private:
@@ -62,14 +63,14 @@ public:
 	~MiniportWaveRT();
 
 	IMP_IMiniportWaveRT;
+	IMP_IMiniportAudioSignalProcessing;
 
 	/*
 		Redirects general property request to miniport object
 	*/
 	static NTSTATUS PropertyHandler_WaveFilter(_In_ PPCPROPERTY_REQUEST PropertyRequest);
-	static NTSTATUS Create(PUNKNOWN * Unknown, REFCLSID, PUNKNOWN UnknownOuter, POOL_TYPE PoolType, PUNKNOWN UnknownAdapter, PVOID DeviceContext, PENDPOINT_MINIPAIR MiniportPair);
+	static NTSTATUS Create(PUNKNOWN * Unknown, REFCLSID, PUNKNOWN UnknownOuter, POOL_FLAGS PoolType, PUNKNOWN UnknownAdapter, PVOID DeviceContext, PENDPOINT_MINIPAIR MiniportPair);
 
-	IAdapterCommon* GetAdapter();
 
 	NTSTATUS MiniportWaveRT::StreamClosed(ULONG pin, MiniportWaveRTStream* stream);
 	NTSTATUS MiniportWaveRT::StreamCreated(_In_ ULONG _Pin, _In_ MiniportWaveRTStream* _Stream);

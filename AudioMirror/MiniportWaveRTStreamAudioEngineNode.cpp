@@ -727,7 +727,6 @@ NTSTATUS MiniportWaveRTStream::GetPresentationPosition(_Out_  KSAUDIO_PRESENTATI
 {
 	ASSERT(_pPresentationPosition);
 	LARGE_INTEGER timeStamp;
-	IAdapterCommon* pAdapterComm = m_pMiniport->GetAdapter();
 
 	ULONGLONG ullLinearPosition = { 0 };
 	ULONGLONG ullPresentationPosition = { 0 };
@@ -742,16 +741,6 @@ NTSTATUS MiniportWaveRTStream::GetPresentationPosition(_Out_  KSAUDIO_PRESENTATI
 	_pPresentationPosition->u64PositionInBlocks = ullPresentationPosition * m_pWfExt->Format.nSamplesPerSec / m_pWfExt->Format.nAvgBytesPerSec;
 	_pPresentationPosition->u64QPCPosition = (UINT64)timeStamp.QuadPart;
 
-	//Event type: eMINIPORT_GET_PRESENTATION_POSITION
-	//Parameter 1: Current linear buffer position    
-	//Parameter 2: Previous WaveRtBufferWritePosition that the driver received    
-	//Parameter 3: Presentation position
-	//Parameter 4: 0
-	pAdapterComm->WriteEtwEvent(eMINIPORT_GET_PRESENTATION_POSITION,
-		ullLinearPosition, // replace with the correct "Current linear buffer position"    
-		m_ulCurrentWritePosition,
-		_pPresentationPosition->u64PositionInBlocks,
-		0);  // always zero
 	return STATUS_SUCCESS;
 }
 
@@ -803,19 +792,6 @@ NTSTATUS MiniportWaveRTStream::SetCurrentWritePositionInternal(_In_  ULONG _ulCu
 		return STATUS_INVALID_DEVICE_REQUEST;
 	}
 
-	IAdapterCommon* pAdapterComm = m_pMiniport->GetAdapter();
-
-	//Event type: eMINIPORT_SET_WAVERT_BUFFER_WRITE_POSITION
-	//Parameter 1: Current linear buffer position    
-	//Parameter 2: Previous WaveRtBufferWritePosition that the driver received    
-	//Parameter 3: Target WaveRtBufferWritePosition received from portcls
-	//Parameter 4: 0
-	pAdapterComm->WriteEtwEvent(eMINIPORT_SET_WAVERT_BUFFER_WRITE_POSITION,
-		m_ullLinearPosition, // replace with the correct "Current linear buffer position"    
-		m_ulCurrentWritePosition,
-		_ulCurrentWritePosition, // this is new write position
-		0); // always zero
-
 //
 // Check for eMINIPORT_GLITCH_REPORT - Same WaveRT buffer write during event driven mode.
 //
@@ -823,16 +799,7 @@ NTSTATUS MiniportWaveRTStream::SetCurrentWritePositionInternal(_In_  ULONG _ulCu
 	{
 		if (m_ulCurrentWritePosition == _ulCurrentWritePosition)
 		{
-			//Event type: eMINIPORT_GLITCH_REPORT
-			//Parameter 1: Current linear buffer position 
-			//Parameter 2: Previous WaveRtBufferWritePosition that the driver received 
-			//Parameter 3: Major glitch code: 3: Received same WaveRT buffer twice in a row during event driven mode
-			//Parameter 4: Minor code for the glitch cause
-			pAdapterComm->WriteEtwEvent(eMINIPORT_GLITCH_REPORT,
-				m_ullLinearPosition, // replace with the correct "Current linear buffer position"
-				m_ulCurrentWritePosition,
-				3, // received same WaveRT buffer twice in a row during event driven mode
-				_ulCurrentWritePosition);
+
 		}
 	}
 

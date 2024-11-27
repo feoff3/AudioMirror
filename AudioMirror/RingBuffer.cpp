@@ -13,54 +13,57 @@ RingBuffer::~RingBuffer()
 {
 	if (m_Buffer != NULL)
 	{
-		KeAcquireSpinLock(m_BufferLock, &m_SpinLockIrql);
+		KeAcquireSpinLock(&m_BufferLock, &m_SpinLockIrql);
 		ExFreePoolWithTag(m_Buffer, RING_BUFFER_TAG);
 		ExFreePoolWithTag(m_AlignBuffer, RING_BUFFER_TAG);
 		m_Buffer = NULL;
 		m_AlignBuffer = NULL;
 		m_BufferLength = 0;
-		KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+		KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 	}
 
-	if (m_BufferLock != NULL) 
-	{
-		ExFreePoolWithTag(m_BufferLock, RING_BUFFER_TAG);
-		m_BufferLock = NULL;
-	}
+	//if (m_BufferLock != NULL)
+	//{
+	//	ExFreePoolWithTag(m_BufferLock, RING_BUFFER_TAG);
+	//	m_BufferLock = NULL;
+	//}
 }
 
 NTSTATUS RingBuffer::Init(SIZE_T bufferSize, SIZE_T nByteAlign)
 {
-	if (m_BufferLock == NULL)
-	{
-		m_BufferLock = new(NonPagedPoolNx, sizeof(KSPIN_LOCK)) KSPIN_LOCK;
-		if (m_BufferLock == NULL) return STATUS_INSUFFICIENT_RESOURCES;
-		KeInitializeSpinLock(m_BufferLock);
-	}
+
+	//if (m_BufferLock == NULL)
+	//{
+	//	m_BufferLock = new(POOL_FLAG_NON_PAGED, sizeof(KSPIN_LOCK)) KSPIN_LOCK;
+	//	if (m_BufferLock == NULL) return STATUS_INSUFFICIENT_RESOURCES;
+	//	KeInitializeSpinLock(&m_BufferLock);
+	//}
+
+	KeInitializeSpinLock(&m_BufferLock);
 
 	if (m_Buffer != NULL) 
 	{
-		KeAcquireSpinLock(m_BufferLock, &m_SpinLockIrql);
+		KeAcquireSpinLock(&m_BufferLock, &m_SpinLockIrql);
 		ExFreePoolWithTag(m_Buffer, RING_BUFFER_TAG);
 		ExFreePoolWithTag(m_AlignBuffer, RING_BUFFER_TAG);
 		m_Buffer = NULL;
 		m_AlignBuffer = NULL;
-		KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+		KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 	}
 
-	KeAcquireSpinLock(m_BufferLock, &m_SpinLockIrql);
-	m_Buffer = static_cast<BYTE*>(ExAllocatePoolWithTag(NonPagedPoolNx, bufferSize, RING_BUFFER_TAG));
+	KeAcquireSpinLock(&m_BufferLock, &m_SpinLockIrql);
+	m_Buffer = static_cast<BYTE*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, bufferSize, RING_BUFFER_TAG));
 	if (m_Buffer == NULL) 
 	{
-		KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+		KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
-	m_AlignBuffer = static_cast<BYTE*>(ExAllocatePoolWithTag(NonPagedPoolNx, nByteAlign, RING_BUFFER_TAG));
+	m_AlignBuffer = static_cast<BYTE*>(ExAllocatePool2(POOL_FLAG_NON_PAGED, nByteAlign, RING_BUFFER_TAG));
 	if (m_AlignBuffer == NULL)
 	{
 		ExFreePoolWithTag(m_Buffer, RING_BUFFER_TAG);
 		m_Buffer = NULL;
-		KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+		KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
 	m_BufferLength = bufferSize;
@@ -68,7 +71,7 @@ NTSTATUS RingBuffer::Init(SIZE_T bufferSize, SIZE_T nByteAlign)
 	m_LinearBufferWritePosition = 0;
 	m_LinearBufferReadPosition = 0;
 	m_IsFilling = TRUE;
-	KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+	KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 
 	return STATUS_SUCCESS;
 }
@@ -79,7 +82,7 @@ NTSTATUS RingBuffer::PutInternal(BYTE* pBytes, SIZE_T count)
 	if (count > m_BufferLength) return STATUS_BUFFER_TOO_SMALL;
 	
 	NTSTATUS status = STATUS_SUCCESS;
-	KeAcquireSpinLock(m_BufferLock, &m_SpinLockIrql);
+	KeAcquireSpinLock(&m_BufferLock, &m_SpinLockIrql);
 	
 	SIZE_T actualCount = m_nByteAlignBufferCount + count;
 	if (actualCount >= m_nByteAlign)
@@ -102,7 +105,7 @@ NTSTATUS RingBuffer::PutInternal(BYTE* pBytes, SIZE_T count)
 		m_nByteAlignBufferCount += count;
 	}
 
-	KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+	KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 	return status;
 }
 
@@ -141,16 +144,16 @@ NTSTATUS RingBuffer::Put(BYTE* pBytes, SIZE_T count)
 
 NTSTATUS RingBuffer::Take(BYTE* pTarget, SIZE_T count, SIZE_T* readCount)
 {
-	KeAcquireSpinLock(m_BufferLock, &m_SpinLockIrql);
+	KeAcquireSpinLock(&m_BufferLock, &m_SpinLockIrql);
 
 	if (m_IsFilling)
 	{
 		*readCount = 0;
-		KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+		KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 		return STATUS_DEVICE_NOT_READY;
 	}
 
-	count = min(count, m_LinearBufferWritePosition - m_LinearBufferReadPosition);
+	count = (SIZE_T) min(count, m_LinearBufferWritePosition - m_LinearBufferReadPosition);
 	SIZE_T bufferOffset = m_LinearBufferReadPosition % m_BufferLength;
 	SIZE_T bytesRead = 0;
 	while (count > 0)
@@ -170,7 +173,7 @@ NTSTATUS RingBuffer::Take(BYTE* pTarget, SIZE_T count, SIZE_T* readCount)
 		//m_nByteAlignBufferCount = 0;
 	}
 
-	KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+	KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 	return STATUS_SUCCESS;
 }
 
@@ -183,17 +186,17 @@ SIZE_T RingBuffer::GetSize()
 
 SIZE_T RingBuffer::GetAvailableBytes()
 {
-	return m_IsFilling ? 0 : m_LinearBufferWritePosition - m_LinearBufferReadPosition;
+	return (SIZE_T)(m_IsFilling ? 0 : m_LinearBufferWritePosition - m_LinearBufferReadPosition);
 }
 
 void RingBuffer::Clear()
 {
-	KeAcquireSpinLock(m_BufferLock, &m_SpinLockIrql);
+	KeAcquireSpinLock(&m_BufferLock, &m_SpinLockIrql);
 
 	RtlZeroMemory(m_Buffer, m_BufferLength);
 	m_IsFilling = true;
 	m_LinearBufferReadPosition = 0;
 	m_LinearBufferWritePosition = 0;
 
-	KeReleaseSpinLock(m_BufferLock, m_SpinLockIrql);
+	KeReleaseSpinLock(&m_BufferLock, m_SpinLockIrql);
 }

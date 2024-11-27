@@ -78,11 +78,13 @@ Return Value:
 		ExFreePoolWithTag(m_pWfExt, MINWAVERTSTREAM_POOLTAG);
 		m_pWfExt = NULL;
 	}
+
 	if (m_RingBuffer)
 	{
-		ExFreePoolWithTag(m_RingBuffer, MINWAVERTSTREAM_POOLTAG);
+		delete m_RingBuffer;
 		m_RingBuffer = NULL;
 	}
+	
 	if (m_pNotificationTimer)
 	{
 		ExDeleteTimer
@@ -220,34 +222,34 @@ Return Value:
 	m_bCapture = Capture_;
 	m_ulDmaMovementRate = pWfEx->nAvgBytesPerSec;
 
-	m_pDpc = (PRKDPC)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(KDPC), MINWAVERTSTREAM_POOLTAG);
+	m_pDpc = (PRKDPC)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(KDPC), MINWAVERTSTREAM_POOLTAG);
 	if (!m_pDpc)
 	{
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
 
-	m_pWfExt = (PWAVEFORMATEXTENSIBLE)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(WAVEFORMATEX) + pWfEx->cbSize, MINWAVERTSTREAM_POOLTAG);
+	m_pWfExt = (PWAVEFORMATEXTENSIBLE)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(WAVEFORMATEX) + pWfEx->cbSize, MINWAVERTSTREAM_POOLTAG);
 	if (m_pWfExt == NULL)
 	{
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
 	RtlCopyMemory(m_pWfExt, pWfEx, sizeof(WAVEFORMATEX) + pWfEx->cbSize);
 
-	m_pbMuted = (PBOOL)ExAllocatePoolWithTag(NonPagedPoolNx, m_pWfExt->Format.nChannels * sizeof(BOOL), MINWAVERTSTREAM_POOLTAG);
+	m_pbMuted = (PBOOL)ExAllocatePool2(POOL_FLAG_NON_PAGED, m_pWfExt->Format.nChannels * sizeof(BOOL), MINWAVERTSTREAM_POOLTAG);
 	if (m_pbMuted == NULL)
 	{
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
 	RtlZeroMemory(m_pbMuted, m_pWfExt->Format.nChannels * sizeof(BOOL));
 
-	m_plVolumeLevel = (PLONG)ExAllocatePoolWithTag(NonPagedPoolNx, m_pWfExt->Format.nChannels * sizeof(LONG), MINWAVERTSTREAM_POOLTAG);
+	m_plVolumeLevel = (PLONG)ExAllocatePool2(POOL_FLAG_NON_PAGED, m_pWfExt->Format.nChannels * sizeof(LONG), MINWAVERTSTREAM_POOLTAG);
 	if (m_plVolumeLevel == NULL)
 	{
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
 	RtlZeroMemory(m_plVolumeLevel, m_pWfExt->Format.nChannels * sizeof(LONG));
 
-	m_plPeakMeter = (PLONG)ExAllocatePoolWithTag(NonPagedPoolNx, m_pWfExt->Format.nChannels * sizeof(LONG), MINWAVERTSTREAM_POOLTAG);
+	m_plPeakMeter = (PLONG)ExAllocatePool2(POOL_FLAG_NON_PAGED, m_pWfExt->Format.nChannels * sizeof(LONG), MINWAVERTSTREAM_POOLTAG);
 	if (m_plPeakMeter == NULL)
 	{
 		return STATUS_INSUFFICIENT_RESOURCES;
@@ -404,7 +406,11 @@ NTSTATUS MiniportWaveRTStream::AllocateBufferWithNotification
 	ulBufferDurationMs = (RequestedSize_ * 1000) / m_ulDmaMovementRate;
 	m_ulNotificationIntervalMs = ulBufferDurationMs / NotificationCount_;
 
-	m_RingBuffer = new(NonPagedPoolNx, MINWAVERTSTREAM_POOLTAG)RingBuffer;
+	if (m_RingBuffer != NULL)
+	{
+		delete m_RingBuffer;
+	}
+	m_RingBuffer = new(POOL_FLAG_NON_PAGED, DRIVER_POOLTAG) RingBuffer;
 	m_RingBuffer->Init(m_ulDmaBufferSize * 4, m_pWfExt->Format.nBlockAlign);
 
 	*AudioBufferMdl_ = pBufferMdl;
@@ -455,8 +461,8 @@ NTSTATUS MiniportWaveRTStream::RegisterNotificationEvent
 
 	PAGED_CODE();
 
-	NotificationListEntry *nleNew = (NotificationListEntry*)ExAllocatePoolWithTag(
-		NonPagedPoolNx,
+	NotificationListEntry *nleNew = (NotificationListEntry*)ExAllocatePool2(
+		POOL_FLAG_NON_PAGED,
 		sizeof(NotificationListEntry),
 		MINWAVERTSTREAM_POOLTAG);
 	if (NULL == nleNew)
@@ -947,20 +953,8 @@ NTSTATUS MiniportWaveRTStream::SetState
 )
 {
 	NTSTATUS        ntStatus = STATUS_SUCCESS;
-	IAdapterCommon*  pAdapterComm = m_pMiniport->GetAdapter();
 	KIRQL oldIrql;
 
-	// Spew an event for a pin state change request from portcls
-	//Event type: eMINIPORT_PIN_STATE
-	//Parameter 1: Current linear buffer position
-	//Parameter 2: Current WaveRtBufferWritePosition
-	//Parameter 3: Pin State 0->KS_STOP, 1->KS_ACQUIRE, 2->KS_PAUSE, 3->KS_RUN 
-	//Parameter 4: 0
-	pAdapterComm->WriteEtwEvent(eMINIPORT_PIN_STATE,
-		m_ullLinearPosition, // replace with the correct "Current linear buffer position"
-		m_ulCurrentWritePosition, // replace with the previous WaveRtBufferWritePosition that the driver received
-		State_, // replace with the correct "Data length completed"
-		0); // always zero
 	switch (State_)
 	{
 	case KSSTATE_STOP:
@@ -1183,17 +1177,6 @@ VOID MiniportWaveRTStream::UpdatePosition
 			&& (m_ullWritePosition + ByteDisplacement) % m_ulDmaBufferSize == m_ulCurrentWritePosition)
 		{
 			m_bLastBufferRendered = TRUE;
-			IAdapterCommon* pAdapterComm = m_pMiniport->GetAdapter();
-			//Event type : eMINIPORT_LAST_BUFFER_RENDERED
-			//Parameter 1 : Current linear buffer position
-			//Parameter 2 : the very last WaveRtBufferWritePosition that the driver received
-			//Parameter 3 : 0
-			//Parameter 4 : 0
-			pAdapterComm->WriteEtwEvent(eMINIPORT_LAST_BUFFER_RENDERED,
-				m_ullLinearPosition + ByteDisplacement, // Current linear buffer position  
-				m_ulCurrentWritePosition, // The very last WaveRtBufferWritePosition that the driver received
-				0,
-				0);
 		}
 		// Read from buffer and write to a file.
 		ReadBytes(ByteDisplacement);
@@ -1346,21 +1329,9 @@ TimerNotifyRT
 		goto End;
 	}
 
-	IAdapterCommon*  pAdapterComm = _this->m_pMiniport->GetAdapter();
-
 	// Simple buffer underrun detection.
 	if (!_this->IsCurrentWaveRTWritePositionUpdated() && !_this->m_bEoSReceived)
 	{
-		//Event type: eMINIPORT_GLITCH_REPORT
-		//Parameter 1: Current linear buffer position 
-		//Parameter 2: Previous WaveRtBufferWritePosition that the driver received 
-		//Parameter 3: Major glitch code: 1:WaveRT buffer is underrun
-		//Parameter 4: Minor code for the glitch cause
-		pAdapterComm->WriteEtwEvent(eMINIPORT_GLITCH_REPORT,
-			_this->m_ullLinearPosition,
-			_this->GetCurrentWaveRTWritePosition(),
-			1,      // WaveRT buffer is underrun
-			0);
 	}
 
 	// Send buffer completion event if either of the following is true
@@ -1374,16 +1345,6 @@ TimerNotifyRT
 		while (leCurrent != &_this->m_NotificationList)
 		{
 			NotificationListEntry* nleCurrent = CONTAINING_RECORD(leCurrent, NotificationListEntry, ListEntry);
-			//Event type: eMINIPORT_BUFFER_COMPLETE
-			//Parameter 1: Current linear buffer position
-			//Parameter 2: Previous WaveRtBufferWritePosition that the driver received
-			//Parameter 3: Data length completed
-			//Parameter 4: 0
-			pAdapterComm->WriteEtwEvent(eMINIPORT_BUFFER_COMPLETE,
-				_this->m_ullLinearPosition,
-				_this->GetCurrentWaveRTWritePosition(),
-				_this->m_ulDmaBufferSize / _this->m_ulNotificationsPerBuffer, // replace with the correct "Data length completed"
-				0); // always zero
 			KeSetEvent(nleCurrent->NotificationEvent, 0, 0);
 
 			leCurrent = leCurrent->Flink;
