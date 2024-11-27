@@ -69,7 +69,7 @@ public:
 		Redirects general property request to miniport object
 	*/
 	static NTSTATUS PropertyHandler_WaveFilter(_In_ PPCPROPERTY_REQUEST PropertyRequest);
-	static NTSTATUS Create(PUNKNOWN * Unknown, REFCLSID, PUNKNOWN UnknownOuter, POOL_FLAGS PoolType, PUNKNOWN UnknownAdapter, PVOID DeviceContext, PENDPOINT_MINIPAIR MiniportPair);
+	static NTSTATUS Create(PUNKNOWN * Unknown, REFCLSID, PUNKNOWN UnknownOuter, POOL_TYPE PoolType, PUNKNOWN UnknownAdapter, PVOID DeviceContext, PENDPOINT_MINIPAIR MiniportPair);
 
 
 	NTSTATUS MiniportWaveRT::StreamClosed(ULONG pin, MiniportWaveRTStream* stream);

@@ -354,7 +354,7 @@ Return Value:
 	//
 	if (NT_SUCCESS(ntStatus))
 	{
-		stream = new(POOL_FLAG_NON_PAGED, WAVERT_POOLTAG) MiniportWaveRTStream(NULL);
+		stream = new(NonPagedPoolNx, WAVERT_POOLTAG) MiniportWaveRTStream(NULL);
 
 		if (stream)
 		{
@@ -528,7 +528,7 @@ NTSTATUS MiniportWaveRT::Create
 	_Out_           PUNKNOWN                              * Unknown,
 	_In_            REFCLSID,
 	_In_opt_        PUNKNOWN                                UnknownOuter,
-	_In_            POOL_FLAGS                              PoolType,
+	_In_            POOL_TYPE                              PoolType,
 	_In_            PUNKNOWN                                UnknownAdapter,
 	_In_opt_        PVOID                                   DeviceContext,
 	_In_            PENDPOINT_MINIPAIR                      MiniportPair

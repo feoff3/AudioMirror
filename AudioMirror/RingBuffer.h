@@ -4,7 +4,7 @@
 class RingBuffer
 {
 private:
-	KSPIN_LOCK* m_BufferLock;
+	KSPIN_LOCK m_BufferLock;
 	KIRQL m_SpinLockIrql;
 	BYTE* m_Buffer;
 	BYTE* m_AlignBuffer;

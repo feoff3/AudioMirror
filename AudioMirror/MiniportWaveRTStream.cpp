@@ -410,7 +410,7 @@ NTSTATUS MiniportWaveRTStream::AllocateBufferWithNotification
 	{
 		delete m_RingBuffer;
 	}
-	m_RingBuffer = new(POOL_FLAG_NON_PAGED, DRIVER_POOLTAG) RingBuffer;
+	m_RingBuffer = new(NonPagedPoolNx, DRIVER_POOLTAG) RingBuffer;
 	m_RingBuffer->Init(m_ulDmaBufferSize * 4, m_pWfExt->Format.nBlockAlign);
 
 	*AudioBufferMdl_ = pBufferMdl;
